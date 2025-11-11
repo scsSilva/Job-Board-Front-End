@@ -253,172 +253,170 @@
 </template>
 
 <script setup>
-  import { ref, computed, onMounted, watch } from 'vue'
-  import { useDebounceFn } from '@vueuse/core'
-  import NewJobDialog from '@/components/NewJobDialog.vue'
-  import { useAuthStore } from '@/stores/auth'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useDebounceFn } from '@vueuse/core'
+import NewJobDialog from '@/components/NewJobDialog.vue'
+import { useAuthStore } from '@/stores/auth'
 
-  const auth = useAuthStore()
-  auth.load()
-  const { $api, $toast } = useNuxtApp()
+const auth = useAuthStore()
+auth.load()
+const { $api, $toast } = useNuxtApp()
 
-  const userName = computed(() => auth.user?.name)
-  const userRole = computed(() => auth.user?.role)
+const userName = computed(() => auth.user?.name)
+const userRole = computed(() => auth.user?.role)
 
-  const search = ref('')
-  const tab = ref('feed')
-  const dialog = ref(false)
-  const editData = ref(null)
-  const loading = ref(false)
+const search = ref('')
+const tab = ref('feed')
+const dialog = ref(false)
+const editData = ref(null)
+const loading = ref(false)
 
-  const jobs = ref([])
-  const myJobs = ref([])
-  const myApplications = ref([])
+const jobs = ref([])
+const myJobs = ref([])
+const myApplications = ref([])
 
-  const deleteDialog = ref(false)
-  const jobToDelete = ref(null)
+const deleteDialog = ref(false)
+const jobToDelete = ref(null)
 
-  const debouncedSearch = useDebounceFn(loadJobs, 500)
+const loadJobs = async () => {
+  loading.value = true
+  try {
+    const { data: jobsData } = await $api.get('/jobs', {
+      params: { search: search.value || undefined },
+    })
+    jobs.value = jobsData
 
-  const loadJobs = async () => {
-    loading.value = true
-    try {
-      const { data: jobsData } = await $api.get('/jobs', {
-        params: { search: search.value || undefined },
-      })
-      jobs.value = jobsData
-
-      if (userRole.value === 'RECRUITER') {
-        myJobs.value = jobsData.filter(j => j.postedById === auth.user?.id)
-      } else {
-        const { data: apps } = await $api.get(`/applications/user/${auth.user?.id}`)
-        myApplications.value = apps.map(a => a.jobId)
-        myJobs.value = apps.map(a => a.job)
-      }
-    } catch {
-      $toast.error('Erro ao carregar vagas.')
-    } finally {
-      loading.value = false
+    if (userRole.value === 'RECRUITER') {
+      myJobs.value = jobsData.filter(j => j.postedById === auth.user?.id)
+    } else {
+      const { data: apps } = await $api.get(`/applications/user/${auth.user?.id}`)
+      myApplications.value = apps.map(a => a.jobId)
+      myJobs.value = apps.map(a => a.job)
     }
+  } catch {
+    $toast.error('Erro ao carregar vagas.')
+  } finally {
+    loading.value = false
   }
+}
 
-  onMounted(loadJobs)
-  watch(search, () => {
-    debouncedSearch()
-  })
+const debouncedSearch = useDebounceFn(loadJobs, 500)
 
-  function translateTypeLocation(type) {
-    const map = { REMOTE: 'Remoto', HYBRID: 'Híbrido', ONSITE: 'Presencial' }
-    return map[type] || type
+onMounted(loadJobs)
+watch(search, () => debouncedSearch())
+
+function translateTypeLocation(type) {
+  const map = { REMOTE: 'Remoto', HYBRID: 'Híbrido', ONSITE: 'Presencial' }
+  return map[type] || type
+}
+
+function isApplied(job) {
+  return myApplications.value.includes(job.id)
+}
+
+async function apply(job) {
+  try {
+    await $api.post('/applications', { userId: auth.user?.id, jobId: job.id })
+    myApplications.value.push(job.id)
+    $toast.success(`Você aplicou para: ${job.title}`)
+  } catch {
+    $toast.error('Ocorreu um erro ao aplicar para a vaga.')
   }
+}
 
-  function isApplied(job) {
-    return myApplications.value.includes(job.id)
-  }
+function openNewJob() {
+  editData.value = null
+  dialog.value = true
+}
 
-  async function apply(job) {
-    try {
-      await $api.post('/applications', { userId: auth.user?.id, jobId: job.id })
-      myApplications.value.push(job.id)
-      $toast.success(`Você aplicou para: ${job.title}`)
-    } catch {
-      $toast.error('Ocorreu um erro ao aplicar para a vaga.')
-    }
+async function addJob(newJob) {
+  try {
+    const { data } = await $api.post('/jobs', { ...newJob, postedById: auth.user?.id })
+    jobs.value.unshift(data)
+    myJobs.value.unshift(data)
+    $toast.success('Vaga criada com sucesso!')
+  } catch {
+    $toast.error('Ocorreu um erro ao criar a vaga.')
   }
+}
 
-  function openNewJob() {
-    editData.value = null
-    dialog.value = true
-  }
+function editJob(job) {
+  editData.value = { ...job }
+  dialog.value = true
+}
 
-  async function addJob(newJob) {
-    try {
-      const { data } = await $api.post('/jobs', { ...newJob, postedById: auth.user?.id })
-      jobs.value.unshift(data)
-      myJobs.value.unshift(data)
-      $toast.success('Vaga criada com sucesso!')
-    } catch {
-      $toast.error('Ocorreu um erro ao criar a vaga.')
-    }
-  }
+function confirmDelete(job) {
+  jobToDelete.value = job
+  deleteDialog.value = true
+}
 
-  function editJob(job) {
-    editData.value = { ...job }
-    dialog.value = true
+async function deleteJob() {
+  try {
+    await $api.delete(`/jobs/${jobToDelete.value.id}`)
+    jobs.value = jobs.value.filter(j => j.id !== jobToDelete.value.id)
+    myJobs.value = myJobs.value.filter(j => j.id !== jobToDelete.value.id)
+    $toast.success('Vaga excluída com sucesso!')
+  } catch {
+    $toast.error('Ocorreu um erro ao excluir a vaga.')
+  } finally {
+    deleteDialog.value = false
+    jobToDelete.value = null
   }
+}
 
-  function confirmDelete(job) {
-    jobToDelete.value = job
-    deleteDialog.value = true
-  }
+function logout() {
+  auth.logout()
+  location.reload()
+}
 
-  async function deleteJob() {
-    try {
-      await $api.delete(`/jobs/${jobToDelete.value.id}`)
-      jobs.value = jobs.value.filter(j => j.id !== jobToDelete.value.id)
-      myJobs.value = myJobs.value.filter(j => j.id !== jobToDelete.value.id)
-      $toast.success('Vaga excluída com sucesso!')
-    } catch {
-      $toast.error('Ocorreu um erro ao excluir a vaga.')
-    } finally {
-      deleteDialog.value = false
-      jobToDelete.value = null
-    }
-  }
+function formatCurrency(value) {
+  if (!value) return '-'
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
+}
 
-  function logout() {
-    auth.logout()
-    location.reload()
-  }
-
-  function formatCurrency(value) {
-    if (!value) return '-'
-    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)
-  }
-
-  function formatDate(dateStr) {
-    if (!dateStr) return '-'
-    const date = new Date(dateStr)
-    return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
-  }
+function formatDate(dateStr) {
+  if (!dateStr) return '-'
+  const date = new Date(dateStr)
+  return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
 </script>
 
 <style scoped>
-  .feed-bg {
-    background-color: #0d0d0d;
-    color: #fff;
-    min-height: 100vh;
-  }
+.feed-bg {
+  background-color: #0d0d0d;
+  color: #fff;
+  min-height: 100vh;
+}
 
-  .search-input {
-    width: 100%;
-    max-width: 700px;
-    border-radius: 12px;
-    background-color: #1a1a1a !important;
-    color: #fff !important;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
-  }
+.search-input {
+  width: 100%;
+  max-width: 700px;
+  border-radius: 12px;
+  background-color: #1a1a1a !important;
+  color: #fff !important;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
 
-  .jobs-list {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2rem;
-    width: 100%;
-  }
+.jobs-list {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2rem;
+  width: 100%;
+}
 
-  .job-card {
-    background-color: #1c1c1c;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    color: #f1f1f1;
-    transition: all 0.2s ease;
-  }
+.job-card {
+  background-color: #1c1c1c;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #f1f1f1;
+  transition: all 0.2s ease;
+}
 
-  .job-card:hover {
-    border-color: rgba(255, 255, 255, 0.2);
-  }
+.job-card:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+}
 
-  .text-medium-emphasis {
-    opacity: 0.7;
-  }
+.text-medium-emphasis {
+  opacity: 0.7;
+}
 </style>
